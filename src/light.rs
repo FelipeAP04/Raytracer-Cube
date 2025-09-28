@@ -1,5 +1,6 @@
 use raylib::prelude::*;
 
+#[derive(Clone)]
 pub struct Light {
     pub position: Vector3,
     pub color: Color,

@@ -7,7 +7,7 @@ mod cube;
 mod camera;
 mod light;
 mod material;
-mod texture;
+// mod texture; // Commented out for performance
 
 use framebuffer::Framebuffer;
 use ray_intersect::{Intersect, RayIntersect};
@@ -15,7 +15,7 @@ use cube::Cube;
 use camera::Camera;
 use light::Light;
 use material::{Material, vector3_to_color};
-use texture::Texture;
+// use texture::Texture; // Commented out for performance
 
 const ORIGIN_BIAS: f32 = 1e-4;
 
@@ -123,7 +123,7 @@ pub fn cast_ray(
     ray_origin: &Vector3,
     ray_direction: &Vector3,
     objects: &[Cube],
-    light: &Light,
+    lights: &[Light],
     depth: u32,
 ) -> Vector3 {
     if depth > 3 {
@@ -147,30 +147,38 @@ pub fn cast_ray(
         // return SKYBOX_COLOR;
     }
 
-    let light_dir = (light.position - intersect.point).normalized();
     let view_dir = (*ray_origin - intersect.point).normalized();
-    let reflect_dir = reflect(&-light_dir, &intersect.normal).normalized();
-
-    let shadow_intensity = cast_shadow(&intersect, light, objects);
-    let light_intensity = light.intensity * (1.0 - shadow_intensity);
-
-    let diffuse_intensity = intersect.normal.dot(light_dir).max(0.0) * light_intensity;
     let material_color = intersect.material.get_diffuse_color(intersect.u, intersect.v);
-    let diffuse = material_color * diffuse_intensity;
-
-    let specular_intensity = view_dir.dot(reflect_dir).max(0.0).powf(intersect.material.specular) * light_intensity;
-    let light_color_v3 = Vector3::new(light.color.r as f32 / 255.0, light.color.g as f32 / 255.0, light.color.b as f32 / 255.0);
-    let specular = light_color_v3 * specular_intensity;
-
     let albedo = intersect.material.albedo;
-    let phong_color = diffuse * albedo[0] + specular * albedo[1];
+    
+    // Accumulate lighting from all light sources
+    let mut total_diffuse = Vector3::zero();
+    let mut total_specular = Vector3::zero();
+    
+    for light in lights {
+        let light_dir = (light.position - intersect.point).normalized();
+        let reflect_dir = reflect(&-light_dir, &intersect.normal).normalized();
+        
+        let shadow_intensity = cast_shadow(&intersect, light, objects);
+        let light_intensity = light.intensity * (1.0 - shadow_intensity);
+        
+        let diffuse_intensity = intersect.normal.dot(light_dir).max(0.0) * light_intensity;
+        let light_color_v3 = Vector3::new(light.color.r as f32 / 255.0, light.color.g as f32 / 255.0, light.color.b as f32 / 255.0);
+        
+        total_diffuse = total_diffuse + material_color * diffuse_intensity * light_color_v3;
+        
+        let specular_intensity = view_dir.dot(reflect_dir).max(0.0).powf(intersect.material.specular) * light_intensity;
+        total_specular = total_specular + light_color_v3 * specular_intensity;
+    }
+    
+    let phong_color = total_diffuse * albedo[0] + total_specular * albedo[1];
 
     // Reflections
     let reflectivity = intersect.material.albedo[2];
     let reflect_color = if reflectivity > 0.0 {
         let reflect_dir = reflect(ray_direction, &intersect.normal).normalized();
         let reflect_origin = offset_origin(&intersect, &reflect_dir);
-        cast_ray(&reflect_origin, &reflect_dir, objects, light, depth + 1)
+        cast_ray(&reflect_origin, &reflect_dir, objects, lights, depth + 1)
     } else {
         Vector3::zero()
     };
@@ -182,13 +190,13 @@ pub fn cast_ray(
         if let Some(refract_dir) = refract(ray_direction, &intersect.normal, intersect.material.refractive_index) {
             // If refraction is possible, cast a new ray.
             let refract_origin = offset_origin(&intersect, &refract_dir);
-            cast_ray(&refract_origin, &refract_dir, objects, light, depth + 1)
+            cast_ray(&refract_origin, &refract_dir, objects, lights, depth + 1)
         } else {
             // Total internal reflection occurred. In this case, the light is perfectly reflected.
             // We cast a reflection ray instead of a refraction ray.
             let reflect_dir = reflect(ray_direction, &intersect.normal).normalized();
             let reflect_origin = offset_origin(&intersect, &reflect_dir);
-            cast_ray(&reflect_origin, &reflect_dir, objects, light, depth + 1)
+            cast_ray(&reflect_origin, &reflect_dir, objects, lights, depth + 1)
         }
     } else {
         // If the material is not transparent, the refracted color is black.
@@ -199,7 +207,7 @@ pub fn cast_ray(
     phong_color * (1.0 - reflectivity - transparency) + reflect_color * reflectivity + refract_color * transparency
 }
 
-pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, light: &Light) {
+pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, lights: &[Light]) {
     let width = framebuffer.width as f32;
     let height = framebuffer.height as f32;
     let aspect_ratio = width / height;
@@ -218,7 +226,7 @@ pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, 
             
             let rotated_direction = camera.basis_change(&ray_direction);
 
-            let pixel_color_v3 = cast_ray(&camera.eye, &rotated_direction, objects, light, 0);
+            let pixel_color_v3 = cast_ray(&camera.eye, &rotated_direction, objects, lights, 0);
             let pixel_color = vector3_to_color(pixel_color_v3);
 
             framebuffer.set_current_color(pixel_color);
@@ -239,83 +247,189 @@ fn main() {
 
     let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
 
-    // let rubber = Material::new(
-    //     Vector3::new(0.3, 0.1, 0.1),
-    //     10.0,
-    //     [0.9, 0.1, 0.0, 0.0],
-    //     0.0,
-    // );
-
-    // let ivory = Material::new(
-    //     Vector3::new(0.4, 0.4, 0.3),
-    //     50.0,
-    //     [0.6, 0.3, 0.1, 0.0],
-    //     0.0,
-    // );
-
-    // let glass = Material::new(
-    //     Vector3::new(0.6, 0.7, 0.8),
-    //     125.0,
-    //     [0.0, 0.5, 0.1, 0.8],
-    //     1.5,
-    // );
-
-    // Create a textured material with the loaded texture
-    let texture = match Texture::load_from_file("assets/texture.png") {
-        Ok(tex) => {
-            println!("✅ Texture loaded successfully: {}x{} pixels", tex.width, tex.height);
-            tex
-        },
-        Err(e) => {
-            println!("⚠️  Warning: Failed to load texture.png: {}. Using dummy texture.", e);
-            Texture::create_dummy(256, 256)
-        }
-    };
-    
-    let textured_material = Material::new_with_texture(
-        Vector3::new(1.0, 1.0, 1.0), // Base color (will be multiplied with texture)
-        30.0,
-        [0.8, 0.2, 0.0, 0.0], // Mostly diffuse, some specular
+    // Stone material for the pedestal (gray stone-like color with matte finish)
+    let stone = Material::new(
+        Vector3::new(0.5, 0.5, 0.5), // Gray stone color
+        3.0,  // Much lower specular exponent for matte finish
+        [0.95, 0.05, 0.0, 0.0], // Almost entirely diffuse, minimal specular
         0.0,
-        texture,
+    );
+
+    // Lantern material - glowing and semi-transparent to let light through
+    let lantern = Material::new(
+        Vector3::new(1.0, 0.8, 0.4), // Warm yellow/orange glow
+        10.0,
+        [0.0, 0.9, 0.0, 0.9], // Some transparency to let light through
+        1.2,
+    );
+
+    // Steel material - highly reflective metallic surface (fixed transparency)
+    let steel = Material::new(
+        Vector3::new(0.7, 0.7, 0.8), // Slightly bluish metallic color
+        100.0, // High specular exponent for sharp reflections
+        [0.4, 0.4, 0.0, 0.0], // More diffuse/specular, less reflective to avoid transparency
+        0.0,
+    );
+
+    // Wood material - matte, natural surface
+    let wood = Material::new(
+        Vector3::new(0.6, 0.4, 0.2), // Brown wood color
+        3.0,  // Very low specular exponent for matte finish
+        [0.98, 0.02, 0.0, 0.0], // Almost entirely diffuse, very minimal specular
+        0.0,
+    );
+
+    // Iron material - more reflective and lighter than steel
+    let iron = Material::new(
+        Vector3::new(0.85, 0.85, 0.9), // Lighter, brighter metallic color
+        120.0, // Even higher specular exponent for sharper reflections
+        [0.2, 0.3, 0.5, 0.0], // More reflective than steel (50% vs 30%)
+        0.0,
     );
 
     let objects = [
-        // Cube { center: Vector3::new(0.0, 0.0, 0.0), size: 1.0, material: rubber },
-        // Cube { center: Vector3::new(-1.0, -1.0, 1.5), size: 0.5, material: ivory },
-        // Cube { center: Vector3::new(-0.3, 0.3, 1.5), size: 0.3, material: glass },
-        Cube { center: Vector3::new(0.0, 0.0, 0.0), size: 0.8, material: textured_material },
+        // Pedestal - 5x5 base (25 cubes) with 0.5 size
+        // Bottom row (y = -1.0) - 5x5 grid
+        Cube::new_uniform(Vector3::new(-1.0, -1.0, -1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-0.5, -1.0, -1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -1.0, -1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -1.0, -1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, -1.0, -1.0), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-1.0, -1.0, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-0.5, -1.0, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -1.0, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -1.0, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, -1.0, -0.5), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-1.0, -1.0,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-0.5, -1.0,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -1.0,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -1.0,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, -1.0,  0.0), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-1.0, -1.0,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-0.5, -1.0,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -1.0,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -1.0,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, -1.0,  0.5), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-1.0, -1.0,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-0.5, -1.0,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -1.0,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -1.0,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, -1.0,  1.0), 0.25, stone.clone()),
+        
+        // Upper level (y = -0.5) - 3x3 grid
+        Cube::new_uniform(Vector3::new(-0.5, -0.5, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -0.5, -0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -0.5, -0.5), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-0.5, -0.5,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -0.5,  0.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -0.5,  0.0), 0.25, stone.clone()),
+        
+        Cube::new_uniform(Vector3::new(-0.5, -0.5,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.0, -0.5,  0.5), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 0.5, -0.5,  0.5), 0.25, stone.clone()),
+
+        // Floating stone cubes
+        Cube::new_uniform(Vector3::new( 1.0, 1.5,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-1.0, 1.5,  1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new( 1.0, 1.5, -1.0), 0.25, stone.clone()),
+        Cube::new_uniform(Vector3::new(-1.0, 1.5, -1.0), 0.25, stone.clone()),
+
+        // Lanterns
+        Cube::new_box(Vector3::new( 1.0, 1.17,  1.0), 0.15, 0.2, 0.15, lantern.clone()),
+        Cube::new_box(Vector3::new(-1.0, 1.17,  1.0), 0.15, 0.2, 0.15, lantern.clone()),
+        Cube::new_box(Vector3::new( 1.0, 1.17, -1.0), 0.15, 0.2, 0.15, lantern.clone()),
+        Cube::new_box(Vector3::new(-1.0, 1.17, -1.0), 0.15, 0.2, 0.15, lantern.clone()),
+        
+        // Anvil
+        Cube::new_box(Vector3::new(0.0,-0.20, 0.0), 0.20, 0.10, 0.14, steel.clone()),
+        Cube::new_box(Vector3::new(0.0,-0.10, 0.0), 0.15, 0.12, 0.10, steel.clone()),
+        Cube::new_box(Vector3::new(0.0, 0.0, 0.0), 0.25, 0.10, 0.18, steel.clone()),
+
+        // Sword on anvil
+        Cube::new_box(Vector3::new(0.0, 0.1, 0.0), 0.04, 0.13, 0.015, iron.clone()),
+
     ];
 
     let mut camera = Camera::new(
-        Vector3::new(1.0, 2.0, 5.0),
+        Vector3::new(1.0, 1.0, 5.0),
         Vector3::new(0.0, 0.0, 0.0),
         Vector3::new(0.0, 1.0, 0.0),
     );
-    let rotation_speed = PI / 100.0;
+    let rotation_speed = PI / 30.0;
 
-    let light = Light::new(
-        Vector3::new(1.0, -1.0, 5.0),
+    // Main scene light (reduced intensity for softer lighting)
+    let main_light = Light::new(
+        Vector3::new(1.0, 0.5, 5.0),
         Color::new(255, 255, 255, 255),
-        1.5,
+        0.4,  // Reduced from 1.0 to 0.6 for less intense lighting
     );
+    
+    // Lantern lights
+    let lantern_lights = [
+        Light::new(
+            Vector3::new(1.0, 1.0, 1.0),
+            Color::new(255, 200, 100, 255),
+            0.5,
+        ),
+        Light::new(
+            Vector3::new(-1.0, 1.0, 1.0),
+            Color::new(255, 200, 100, 255),
+            0.5,
+        ),
+        Light::new(
+            Vector3::new(1.0, 1.0, -1.0),
+            Color::new(255, 200, 100, 255),
+            0.5,
+        ),
+        Light::new(
+            Vector3::new(-1.0, 1.0, -1.0),
+            Color::new(255, 200, 100, 255),
+            0.5,
+        ),
+    ];
+    
+    // Combine all lights
+    let mut all_lights = vec![main_light];
+    all_lights.extend_from_slice(&lantern_lights);
 
+    let move_speed = 0.9; // Movement speed for forward/backward
+    
     while !window.window_should_close() {
+        // Orbital controls (arrow keys)
         if window.is_key_down(KeyboardKey::KEY_LEFT) {
-            camera.orbit(rotation_speed, 0.2);
+            camera.orbit(rotation_speed, 0.0);  // Left: rotate yaw only (horizontal)
         }
         if window.is_key_down(KeyboardKey::KEY_RIGHT) {
-            camera.orbit(-rotation_speed, 0.2);
+            camera.orbit(-rotation_speed, 0.0); // Right: rotate yaw only (horizontal)
         }
         if window.is_key_down(KeyboardKey::KEY_UP) {
-            camera.orbit(0.0, -rotation_speed);
+            camera.orbit(0.0, -rotation_speed);  // Up: rotate pitch only (vertical)
         }
         if window.is_key_down(KeyboardKey::KEY_DOWN) {
-            camera.orbit(0.0, rotation_speed);
+            camera.orbit(0.0, rotation_speed);   // Down: rotate pitch only (vertical)
+        }
+        
+        // Forward/backward movement (W/S keys)
+        if window.is_key_down(KeyboardKey::KEY_W) {
+            // Move forward towards the center point
+            let direction = (camera.center - camera.eye).normalized();
+            camera.eye = camera.eye + direction * move_speed;
+            camera.update_basis_vectors();
+        }
+        if window.is_key_down(KeyboardKey::KEY_S) {
+            // Move backward away from the center point
+            let direction = (camera.center - camera.eye).normalized();
+            camera.eye = camera.eye - direction * move_speed;
+            camera.update_basis_vectors();
         }
 
         framebuffer.clear();
-        render(&mut framebuffer, &objects, &camera, &light);
+        render(&mut framebuffer, &objects, &camera, &all_lights);
         framebuffer.swap_buffers(&mut window, &thread);
     }
 }

@@ -1,5 +1,5 @@
 use raylib::prelude::{Color, Vector3};
-use crate::texture::Texture;
+// use crate::texture::Texture; // Commented out for performance
 
 #[derive(Debug, Clone)]
 pub struct Material {
@@ -7,15 +7,17 @@ pub struct Material {
     pub albedo: [f32; 4],
     pub specular: f32,
     pub refractive_index: f32,
-    pub texture: Option<Texture>,
+    // pub texture: Option<Texture>, // Commented out for performance
 }
 
 impl Material {
-    pub fn get_diffuse_color(&self, u: f32, v: f32) -> Vector3 {
-        match &self.texture {
-            Some(texture) => texture.sample(u, v),
-            None => self.diffuse,
-        }
+    pub fn get_diffuse_color(&self, _u: f32, _v: f32) -> Vector3 {
+        // Texture support commented out for performance
+        // match &self.texture {
+        //     Some(texture) => texture.sample(u, v),
+        //     None => self.diffuse,
+        // }
+        self.diffuse
     }
 }
 
@@ -26,19 +28,20 @@ impl Material {
             albedo,
             specular,
             refractive_index,
-            texture: None,
+            // texture: None, // Commented out for performance
         }
     }
 
-    pub fn new_with_texture(diffuse: Vector3, specular: f32, albedo: [f32; 4], refractive_index: f32, texture: Texture) -> Self {
-        Material {
-            diffuse,
-            albedo,
-            specular,
-            refractive_index,
-            texture: Some(texture),
-        }
-    }
+    // Commented out for performance - texture support disabled
+    // pub fn new_with_texture(diffuse: Vector3, specular: f32, albedo: [f32; 4], refractive_index: f32, texture: Texture) -> Self {
+    //     Material {
+    //         diffuse,
+    //         albedo,
+    //         specular,
+    //         refractive_index,
+    //         texture: Some(texture),
+    //     }
+    // }
 
     pub fn black() -> Self {
         Material {
@@ -46,7 +49,7 @@ impl Material {
             albedo: [0.0, 0.0, 0.0, 0.0],
             specular: 0.0,
             refractive_index: 0.0,
-            texture: None,
+            // texture: None, // Commented out for performance
         }
     }
 }

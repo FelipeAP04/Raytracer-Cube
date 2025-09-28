@@ -4,22 +4,42 @@ use raylib::prelude::Vector3;
 
 pub struct Cube {
     pub center: Vector3,
-    pub size: f32, // Half the side length (distance from center to face)
+    pub half_extents: Vector3, // Half dimensions for width, height, depth (x, y, z)
     pub material: Material,
+}
+
+impl Cube {
+    // Constructor for uniform cube (same size in all dimensions)
+    pub fn new_uniform(center: Vector3, size: f32, material: Material) -> Self {
+        Self {
+            center,
+            half_extents: Vector3::new(size, size, size),
+            material,
+        }
+    }
+
+    // Constructor for box with different dimensions
+    pub fn new_box(center: Vector3, width: f32, height: f32, depth: f32, material: Material) -> Self {
+        Self {
+            center,
+            half_extents: Vector3::new(width * 0.5, height * 0.5, depth * 0.5),
+            material,
+        }
+    }
 }
 
 impl RayIntersect for Cube {
     fn ray_intersect(&self, ray_origin: &Vector3, ray_direction: &Vector3) -> Intersect {
-        // Calculate the min and max bounds of the cube
+        // Calculate the min and max bounds of the box
         let min = Vector3::new(
-            self.center.x - self.size,
-            self.center.y - self.size,
-            self.center.z - self.size,
+            self.center.x - self.half_extents.x,
+            self.center.y - self.half_extents.y,
+            self.center.z - self.half_extents.z,
         );
         let max = Vector3::new(
-            self.center.x + self.size,
-            self.center.y + self.size,
-            self.center.z + self.size,
+            self.center.x + self.half_extents.x,
+            self.center.y + self.half_extents.y,
+            self.center.z + self.half_extents.z,
         );
 
         // Calculate intersection parameters for each axis
@@ -108,11 +128,11 @@ impl Cube {
         // Calculate UV coordinates based on which face was hit
         let relative = *point - self.center;
         
-        // Normalize to [-1, 1] range based on cube size
+        // Normalize to [-1, 1] range based on half extents
         let normalized = Vector3::new(
-            relative.x / self.size,
-            relative.y / self.size,
-            relative.z / self.size,
+            relative.x / self.half_extents.x,
+            relative.y / self.half_extents.y,
+            relative.z / self.half_extents.z,
         );
 
         // Calculate UV coordinates based on the face normal
